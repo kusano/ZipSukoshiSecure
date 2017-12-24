@@ -91,16 +91,18 @@ function worker() {
 
         var header = [];
         for (var i=0; i<files.length; i++) {
+            var compressed = compress(files[i].data);
+
             header.push({
                 signature: 0x04034b50,
                 versionNeeded: 20,
                 versionMade: 20,
                 flag: 0,
-                compression: 0,
+                compression: 8, //  Deflate
                 modifiedTime: 0,
                 modifiedDate: 0,
                 crc: crc(files[i].data),
-                compressedSize: files[i].data.length,
+                compressedSize: compressed.length,
                 uncompressedSize: files[i].data.length,
                 fileName: files[i].name,
                 extraField: new Uint8Array(0),
@@ -112,8 +114,8 @@ function worker() {
             });
 
             writeLocalFileHeader(arr, header[i]);
-            for (var d of files[i].data) {
-                arr.push(d);
+            for (var c of compressed) {
+                arr.push(c);
             }
         }
 
@@ -272,6 +274,130 @@ function worker() {
         return ~c;
     }
 
+    function BitStream() {
+        this.data = [];
+        this.c = 0;
+    }
+    BitStream.prototype = {
+        write: function(bit) {
+            if (this.c%8 == 0) {
+                this.data.push(0);
+            }
+            this.data[this.data.length-1] |= bit<<(this.c%8);
+            this.c++;
+        },
+        writeBits: function(bits, len) {
+            for (var i=0; i<len; i++) {
+                this.write(bits>>i&1);
+            }
+        },
+    };
+
+    function Huffman(lengths) {
+        this.lengths = lengths;
+        this.codes = Array(lengths.length);
+        var n = 0;
+        for (var l of lengths) {
+            if (l==0) {
+                n++;
+            }
+        }
+        var c = 0;
+        for (var l=1; n<this.codes.length; l++, c<<=1) {
+            for (var i=0; i<this.lengths.length; i++) {
+                if (this.lengths[i]==l) {
+                    this.codes[i] = c++;
+                    n++;
+                }
+            }
+        }
+    }
+    Huffman.prototype = {
+        write: function(stream, symbol) {
+            for (var i=this.lengths[symbol]-1; i>=0; i--) {
+                stream.write(this.codes[symbol]>>i&1);
+            }
+        }
+    };
+
+    function compress(data) {
+        var literalExtTable = [
+            0, 0, 0, 0, 0, 0, 0, 0,  1, 1, 1, 1, 2, 2, 2, 2,
+            3, 3, 3, 3, 4, 4, 4, 4,  5, 5, 5, 5, 0,
+        ];
+        var distExtTable = [
+            0, 0, 0, 0, 1, 1, 2, 2,  3, 3, 4, 4, 5, 5, 6, 6,
+            7, 7, 8, 8, 9, 9,10,10, 11,11,12,12,13,13,
+        ];
+        function calcCodeExt(value, table, offset) {
+            for (var i=0; i<table.length; i++) {
+                if (value < 1<<table[i]) {
+                    return {code: i+offset, ext: value, extLen: table[i]};
+                }
+                value -= 1<<table[i];
+            }
+            throw 'calcCodeExt';
+        }
+
+        var literal = [];
+        var dist = [];
+        for (var i=0; i<data.length;) {
+            var cand = [[
+                {code: data[i], ext: 0, extLen: 0},
+                {code: -1},
+                1,
+            ]];
+            for (var d=1; d<=16; d++)
+            if (0<=i-d) {
+                for (var l=1; l<=16 && i+l-1<data.length && data[i+l-1]==data[i-d+l-1]; l++) {
+                    if (3<=l) {
+                        cand.push([
+                            calcCodeExt(l-3, literalExtTable, 257),
+                            calcCodeExt(d-1, distExtTable, 0),
+                            l,
+                        ]);
+                    }
+                }
+            }
+            var r = rand()%cand.length;
+            literal.push(cand[r][0]);
+            dist.push(cand[r][1]);
+            i += cand[r][2];
+        }
+        literal.push({code: 256, ext: 0, extLen: 0});
+        dist.push({code: -1});
+
+        literalLen = [];
+        for (var i=0; i<288; i++) {
+            if (i<144) literalLen.push(8);
+            else if (i<256) literalLen.push(9);
+            else if (i<280) literalLen.push(7);
+            else literalLen.push(8);
+        }
+        distLen = [];
+        for (var i=0; i<32; i++) {
+            distLen.push(5);
+        }
+
+        stream = new BitStream();
+        stream.write(1);
+        stream.writeBits(1, 2);
+
+        huffLiteral = new Huffman(literalLen);
+        huffDist = new Huffman(distLen);
+        for (var i=0; i<literal.length; i++) {
+            console.log(literal[i].code, literal[i].ext, literal[i].extLen, dist[i].code, dist[i].ext, dist[i].extLen);
+            huffLiteral.write(stream, literal[i].code);
+            stream.writeBits(literal[i].ext, literal[i].extLen);
+            if (dist[i].code >= 0) {
+                huffDist.write(stream, dist[i].code);
+                stream.writeBits(dist[i].ext, dist[i].extLen);
+            }
+        }
+
+        return stream.data;
+    }
+
     function byte(arr, num) {
         arr.push(num&0xff);
     }
@@ -284,5 +410,15 @@ function worker() {
         arr.push(num>>8&0xff);
         arr.push(num>>16&0xff);
         arr.push(num>>24&0xff);
+    }
+
+    randBuffer = new Uint32Array(1024);
+    randCount = 1024;
+    function rand() {
+        if (randCount >= 1024) {
+            randCount = 0;
+            crypto.getRandomValues(randBuffer);
+        }
+        return randBuffer[randCount++];
     }
 }
