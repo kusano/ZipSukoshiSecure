@@ -367,26 +367,65 @@ function worker() {
         literal.push({code: 256, ext: 0, extLen: 0});
         dist.push({code: -1});
 
+        //  仕様上許される最大値は29
+        var HLIT = rand()%16 + 14;
+        //  HDISTの定義では31まで許されそうだが、30と31は使われないので、念のため最大29
+        var HDIST = rand()%16 + 14;
+        //  ビット長は3-14
+        var HCLEN = rand()%3 + 13;
+
+        function shuffle(arr) {
+            for (var i=arr.length-1; i>=0; i--) {
+                var r = rand()%(i+1);
+                var t = arr[i];
+                arr[i] = arr[r];
+                arr[r] = t;
+            }
+        }
+        var codeLenLen = [];
+        for (var i=0; i<HCLEN+4; i++) {
+            codeLenLen.push((3+i/4)|0);
+        }
+        shuffle(codeLenLen);
         literalLen = [];
-        for (var i=0; i<288; i++) {
-            if (i<144) literalLen.push(8);
-            else if (i<256) literalLen.push(9);
-            else if (i<280) literalLen.push(7);
-            else literalLen.push(8);
+        for (var i=0; i<HLIT+257; i++) {
+            literalLen.push((6+i/32)|0);
         }
+        shuffle(literalLen);
         distLen = [];
-        for (var i=0; i<32; i++) {
-            distLen.push(5);
+        for (var i=0; i<HDIST+1; i++) {
+            distLen.push((3+i/4)|0);
         }
+        shuffle(distLen);
 
         stream = new BitStream();
         stream.write(1);
-        stream.writeBits(1, 2);
+        stream.writeBits(2, 2);
+
+        stream.writeBits(HLIT, 5);
+        stream.writeBits(HDIST, 5);
+        stream.writeBits(HCLEN, 4);
+
+        for (var i=0; i<HCLEN+4; i++) {
+            stream.writeBits(codeLenLen[i], 3);
+        }
+        var trans = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
+        var codeLenLenTrans = [];
+        for (var i=0; i<19; i++) {
+            var idx = trans.indexOf(i);
+            codeLenLenTrans.push(idx < HCLEN+4 ? codeLenLen[idx] : 0);
+        }
+        huffLen = new Huffman(codeLenLenTrans);
+        for (var i=0; i<HLIT+257; i++) {
+            huffLen.write(stream, literalLen[i]);
+        }
+        for (var i=0; i<HDIST+1; i++) {
+            huffLen.write(stream, distLen[i]);
+        }
 
         huffLiteral = new Huffman(literalLen);
         huffDist = new Huffman(distLen);
         for (var i=0; i<literal.length; i++) {
-            console.log(literal[i].code, literal[i].ext, literal[i].extLen, dist[i].code, dist[i].ext, dist[i].extLen);
             huffLiteral.write(stream, literal[i].code);
             stream.writeBits(literal[i].ext, literal[i].extLen);
             if (dist[i].code >= 0) {
