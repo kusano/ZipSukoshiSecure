@@ -21,35 +21,22 @@ var app = new Vue({
             var blob = new Blob(['worker();'+window.worker], {type: 'text/javascrit'});
             this.worker = new Worker(URL.createObjectURL(blob));
             var files = [];
-            for (var i=0; i<this.files.length; i++) {
-                files.push({});
-            }
-            var readData = index => {
-                if (index < files.length) {
+            var read = index => {
+                if (index < this.files.length) {
                     var reader = new FileReader();
                     reader.readAsArrayBuffer(this.files[index]);
                     reader.onload = event => {
-                        files[index].data = new Uint8Array(event.target.result);
-                        readData(index+1);
+                        files.push({
+                            name: this.files[index].name,
+                            data: new Uint8Array(event.target.result),
+                        });
+                        read(index+1);
                     }
                 } else {
                     this.worker.postMessage(files);
                 }
             };
-            //  :-(
-            var readName = index => {
-                if (index < files.length) {
-                    var reader = new FileReader();
-                    reader.readAsArrayBuffer(new Blob([this.files[index].name]));
-                    reader.onload = event => {
-                        files[index].name = new Uint8Array(event.target.result);
-                        readName(index+1);
-                    }
-                } else {
-                    readData(0);
-                }
-            }
-            readName(0);
+            read(0);
             this.worker.onmessage = event => {
                 if (event.data.type == 'log') {
                     this.log += event.data.data;
@@ -97,14 +84,14 @@ function worker() {
                 signature: 0x04034b50,
                 versionNeeded: 20,
                 versionMade: 20,
-                flag: 0,
+                flag: 1<<11,    //  UTF-8
                 compression: 8, //  Deflate
                 modifiedTime: 0,
                 modifiedDate: 0,
                 crc: crc(files[i].data),
                 compressedSize: compressed.length,
                 uncompressedSize: files[i].data.length,
-                fileName: files[i].name,
+                fileName: utf8(files[i].name),
                 extraField: new Uint8Array(0),
                 comment: new Uint8Array(0),
                 disk: 0,
@@ -468,5 +455,31 @@ function worker() {
             crypto.getRandomValues(randBuffer);
         }
         return randBuffer[randCount++];
+    }
+
+    function utf8(str) {
+        var result = [];
+        for (var i=0; i<str.length; i++) {
+            var code = str.codePointAt(i);
+            if (code >= 0x10000) {
+                i++;
+            }
+            if (code < 0x80) {
+                result.push(code);
+            } else if (code < 0x800) {
+                result.push(0xc0 | code>>6);
+                result.push(0x80 | code&0x3f);
+            } else if (code < 0x10000) {
+                result.push(0xe0 | code>>12);
+                result.push(0x80 | code>>6&0x3f);
+                result.push(0x80 | code&0x3f);
+            } else {
+                result.push(0xf0 | code>>18);
+                result.push(0x80 | code>>12&0x3f);
+                result.push(0x80 | code>>6&0x3f);
+                result.push(0x80 | code&0x3f);
+            }
+        }
+        return new Uint8Array(result);
     }
 }
