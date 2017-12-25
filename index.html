@@ -34,16 +34,16 @@
                 <v-btn
                   color="primary"
                   type="submit"
-                  v-if="!worker"
+                  v-show="!worker"
                   :disabled="!(password && files)">
                   アーカイブ・暗号化
                 </v-btn>
                 <v-progress-circular
-                  v-if="worker"
+                  v-show="worker"
                   indeterminate
                   color="primary"
                 ></v-progress-circular>
-                <v-btn color="error" v-if="worker">
+                <v-btn color="error" v-show="worker" @click.prevent="cancel">
                   キャンセル
                 </v-btn>
               </div>

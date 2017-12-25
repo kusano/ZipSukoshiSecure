@@ -56,6 +56,10 @@ var app = new Vue({
                 }
             };
         },
+        cancel: function() {
+            this.worker.terminate();
+            this.worker = undefined;
+        },
     }
 });
 
