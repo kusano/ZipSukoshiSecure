@@ -374,29 +374,38 @@ function worker() {
         //  ビット長は3-14
         var HCLEN = rand()%3 + 13;
 
-        function shuffle(arr) {
-            for (var i=arr.length-1; i>=0; i--) {
-                var r = rand()%(i+1);
-                var t = arr[i];
-                arr[i] = arr[r];
-                arr[r] = t;
+        function makeLengths(num, min) {
+            var block = 1<<(min-1);
+            var max = (min + (num+block-1)/block - 1)|0;
+            if (max - min < 2) {
+                throw 'makeLengths';
             }
+            var lengths = [];
+            for (var l=min; l<max-2; l++) {
+                for (var i=0; i<block; i++) {
+                    lengths.push(l);
+                }
+            }
+            var rem = (max-min+1)*block - num;
+            for (var i=0; i<block+rem; i++) {
+                lengths.push(max-2);
+            }
+            for (var i=0; i<block*2-rem*2; i++) {
+                lengths.push(max-1);
+            }
+
+            for (var i=num-1; i>=0; i--) {
+                var r = rand()%(i+1);
+                var t = lengths[i];
+                lengths[i] = lengths[r];
+                lengths[r] = t;
+            }
+            return lengths;
         }
-        var codeLenLen = [];
-        for (var i=0; i<HCLEN+4; i++) {
-            codeLenLen.push((3+i/4)|0);
-        }
-        shuffle(codeLenLen);
-        literalLen = [];
-        for (var i=0; i<HLIT+257; i++) {
-            literalLen.push((6+i/32)|0);
-        }
-        shuffle(literalLen);
-        distLen = [];
-        for (var i=0; i<HDIST+1; i++) {
-            distLen.push((3+i/4)|0);
-        }
-        shuffle(distLen);
+
+        var codeLenLen = makeLengths(HCLEN+4, 3);
+        var literalLen = makeLengths(HLIT+257, 6);
+        var distLen = makeLengths(HDIST+1, 3);
 
         stream = new BitStream();
         stream.write(1);
