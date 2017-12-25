@@ -33,7 +33,10 @@ var app = new Vue({
                         read(index+1);
                     }
                 } else {
-                    this.worker.postMessage(files);
+                    this.worker.postMessage({
+                        files: files,
+                        password: this.password,
+                    });
                 }
             };
             read(0);
@@ -58,7 +61,7 @@ var app = new Vue({
 
 function worker() {
     onmessage = function(event) {
-        var zip = encrypt(event.data);
+        var zip = makeZip(event.data.files, event.data.password);
         postMessage({
             type: 'encrypted',
             data: zip,
@@ -72,24 +75,29 @@ function worker() {
         });
     }
 
-    function encrypt(files) {
+    function makeZip(files, password) {
         log('start');
         var arr = [];
 
         var header = [];
         for (var i=0; i<files.length; i++) {
+            log('compressing '+files[i].name);
             var compressed = compress(files[i].data);
+
+            log('encrypting '+files[i].name, crc32);
+            var crc32 = crc(files[i].data);
+            var encrypted = encrypt(compressed, utf8(password), crc32);
 
             header.push({
                 signature: 0x04034b50,
                 versionNeeded: 20,
                 versionMade: 20,
-                flag: 1<<11,    //  UTF-8
+                flag: 1<<11 | 1,//  UTF-8, encrypted
                 compression: 8, //  Deflate
                 modifiedTime: 0,
                 modifiedDate: 0,
-                crc: crc(files[i].data),
-                compressedSize: compressed.length,
+                crc: crc32,
+                compressedSize: encrypted.length,
                 uncompressedSize: files[i].data.length,
                 fileName: utf8(files[i].name),
                 extraField: new Uint8Array(0),
@@ -101,8 +109,8 @@ function worker() {
             });
 
             writeLocalFileHeader(arr, header[i]);
-            for (var c of compressed) {
-                arr.push(c);
+            for (var e of encrypted) {
+                arr.push(e);
             }
         }
 
@@ -445,6 +453,50 @@ function worker() {
         arr.push(num>>8&0xff);
         arr.push(num>>16&0xff);
         arr.push(num>>24&0xff);
+    }
+
+    function encrypt(data, password, crc32) {
+        var result = new Uint8Array(12+data.length);
+        for (var i=0; i<11; i++) {
+            result[i] = rand()%256;
+        }
+        result[11] = crc32>>24&0xff;
+        for (var i=12; i<12+data.length; i++) {
+            result[i] = data[i-12];
+        }
+
+        key0 = 0x12345678;
+        key1 = 0x23456789;
+        key2 = 0x34567890;
+
+        function mul32(a, b) {
+            var ah = a>>16 & 0xffff;
+            var al = a & 0xffff;
+            var bh = b>>16 & 0xffff;
+            var bl = b & 0xffff;
+            var c = al*bl + ((ah*bl)<<16&0xffff0000) + ((bh*al)<<16&0xffff0000);
+            return c & 0xffffffff;
+        }
+        function update(c) {
+            key0 = key0>>8&0xffffff ^ crcTable[(key0^c)&0xff];
+            key1 = (mul32(key1 + (key0&0xff), 0x08088405) + 1) & 0xffffffff;
+            key2 = key2>>8&0xffffff ^ crcTable[(key2^key1>>24)&0xff];
+        }
+        function decrypt() {
+            var temp = key2&0xffff | 2;
+            return (temp*(temp^1))>>8&0xff;
+        }
+
+        for (var p of password) {
+            update(p);
+        }
+        for (var i=0; i<result.length; i++) {
+            var t = result[i];
+            result[i] ^= decrypt();
+            update(t);
+        }
+
+        return result;
     }
 
     randBuffer = new Uint32Array(1024);
