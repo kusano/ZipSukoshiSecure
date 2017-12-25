@@ -14,7 +14,23 @@
         </v-toolbar>
         <v-content>
           <v-container>
-            <v-form @submit.prevent="submit">
+            <div class="mt-4 mb-5">
+              <p>
+                ZIPのTraditional PKWARE Encryptionによる暗号化は脆弱ですが、このツールではなるべくセキュアになるように暗号化します。
+                AES暗号などと異なりWindowsのエクスプローラーでも復号することが可能です。
+                JavaScriptで実装しているので、ファイルやパスワードがサーバーに送信されることはありません。
+                その代わり動作が重く、数メガバイト程度のファイルまでしか暗号化できません。
+              </p>
+              <p>
+                原理は下記の記事を参照してください。
+                31,337円分のAmazonギフト券をこのツールで暗号化して記事中で公開しています。
+                今のところ破られてはいないようです。
+              </p>
+              <p>
+                <a href="https://qiita.com/kusano_k/items/f945b6a7fd150bae23b7">https://qiita.com/kusano_k/items/f945b6a7fd150bae23b7</a>
+              </p>
+            </div>
+            <v-form @submit.prevent="submit" class="my-4">
               <input
                 @change.prevent="changeFile"
                 type="file"
